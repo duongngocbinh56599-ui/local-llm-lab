@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import unittest
 
+from local_llm_lab.cli import main
 from local_llm_lab.planner import make_plan
 
 
@@ -54,7 +57,43 @@ class PlannerTest(unittest.TestCase):
         )
         self.assertEqual(plan.recommended_backend, "mlx")
 
+    def test_plan_rejects_invalid_run_and_architecture_values(self) -> None:
+        base = {
+            "model_name": "llama-3.3-70b",
+            "quant_name": "Q4_K_M",
+            "context_tokens": 8192,
+            "hardware_fixture": "apple-m4-max-128gb",
+        }
+        invalid_values = (
+            {"context_tokens": 0},
+            {"concurrency": 0},
+            {"kv_dtype_bytes": 0},
+            {"layers": 0},
+            {"heads": 0},
+            {"kv_heads": 0},
+            {"head_dim": 0},
+            {"heads": 8, "kv_heads": 9},
+        )
+        for overrides in invalid_values:
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(ValueError):
+                    make_plan(**{**base, **overrides})
+
+    def test_cli_rejects_nonpositive_values_without_traceback(self) -> None:
+        cases = (
+            (["plan", "--params", "70B", "--ctx", "0"], "argument --ctx"),
+            (["compare", "--params", "70B", "--contexts", "4096,0"], "positive"),
+        )
+        for command, message in cases:
+            with self.subTest(command=command):
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit) as raised:
+                        main(command)
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn(message, stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
-

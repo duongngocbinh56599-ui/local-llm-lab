@@ -57,6 +57,8 @@ def parse_int_csv(value: str | None, defaults: list[int]) -> list[int]:
         raise ValueError(f"Invalid integer list: {value!r}") from exc
     if not items:
         raise ValueError("Expected at least one comma-separated integer.")
+    if any(item <= 0 for item in items):
+        raise ValueError("Integer list values must all be positive.")
     return items
 
 

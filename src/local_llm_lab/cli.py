@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from math import isfinite
 from pathlib import Path
 
 from .bench import mock_benchmark, save_bench, tiny_local_benchmark
@@ -27,23 +28,52 @@ from .render import print_json, print_plan
 from .report import generate_report
 from .server import serve_directory
 from .stress import mock_stress, save_stress
+from .units import parse_params
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a finite value greater than 0") from None
+    if not isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a finite value greater than 0")
+    return parsed
+
+
+def _parameter_count(value: str) -> str:
+    try:
+        parse_params(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+    return value
 
 
 def _add_plan_args(parser: argparse.ArgumentParser) -> None:
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--model", help="Curated model preset, e.g. llama-3.3-70b")
-    group.add_argument("--params", help="Free-form parameter count, e.g. 70B, 120B, 600B")
+    group.add_argument("--params", type=_parameter_count, help="Free-form parameter count, e.g. 70B, 120B, 600B")
     parser.add_argument("--quant", default="Q4_K_M", help="Quantization, e.g. Q4_K_M, Q5_K_M, IQ2_XS")
-    parser.add_argument("--ctx", type=int, default=8192, help="Context length in tokens")
-    parser.add_argument("--concurrency", type=int, default=1, help="Concurrent sequences/requests")
+    parser.add_argument("--ctx", type=_positive_int, default=8192, help="Context length in tokens")
+    parser.add_argument("--concurrency", type=_positive_int, default=1, help="Concurrent sequences/requests")
     parser.add_argument("--backend", default="auto", help="auto, llama.cpp, mlx, ollama, vllm")
     parser.add_argument("--format", default=None, help="gguf, mlx, safetensors, hf")
     parser.add_argument("--hardware", default=None, help="Use fixture:name or profile:name")
-    parser.add_argument("--layers", type=int, default=None)
-    parser.add_argument("--heads", type=int, default=None)
-    parser.add_argument("--kv-heads", type=int, default=None)
-    parser.add_argument("--head-dim", type=int, default=None)
-    parser.add_argument("--kv-dtype-bytes", type=float, default=2.0)
+    parser.add_argument("--layers", type=_positive_int, default=None)
+    parser.add_argument("--heads", type=_positive_int, default=None)
+    parser.add_argument("--kv-heads", type=_positive_int, default=None)
+    parser.add_argument("--head-dim", type=_positive_int, default=None)
+    parser.add_argument("--kv-dtype-bytes", type=_positive_float, default=2.0)
 
 
 def _resolve_hardware_ref(value: str | None):
@@ -396,18 +426,18 @@ def build_parser() -> argparse.ArgumentParser:
     compare = sub.add_parser("compare", help="Compare quantization/context/backend planning tradeoffs.")
     group = compare.add_mutually_exclusive_group(required=False)
     group.add_argument("--model", help="Curated model preset, e.g. llama-3.3-70b")
-    group.add_argument("--params", help="Free-form parameter count, e.g. 70B, 120B, 600B")
+    group.add_argument("--params", type=_parameter_count, help="Free-form parameter count, e.g. 70B, 120B, 600B")
     compare.add_argument("--quants", default=None, help="Comma-separated quantizations. Default: Q8_0,Q6_K,Q5_K_M,Q4_K_M,Q3_K_M,IQ2_XS")
     compare.add_argument("--contexts", default=None, help="Comma-separated context lengths. Default: 4096,8192,16384,32768")
     compare.add_argument("--backends", default=None, help="Comma-separated backends. Default: auto")
-    compare.add_argument("--concurrency", type=int, default=1)
+    compare.add_argument("--concurrency", type=_positive_int, default=1)
     compare.add_argument("--format", default=None)
     compare.add_argument("--hardware", default=None, help="Use fixture:name or profile:name")
-    compare.add_argument("--layers", type=int, default=None)
-    compare.add_argument("--heads", type=int, default=None)
-    compare.add_argument("--kv-heads", type=int, default=None)
-    compare.add_argument("--head-dim", type=int, default=None)
-    compare.add_argument("--kv-dtype-bytes", type=float, default=2.0)
+    compare.add_argument("--layers", type=_positive_int, default=None)
+    compare.add_argument("--heads", type=_positive_int, default=None)
+    compare.add_argument("--kv-heads", type=_positive_int, default=None)
+    compare.add_argument("--head-dim", type=_positive_int, default=None)
+    compare.add_argument("--kv-dtype-bytes", type=_positive_float, default=2.0)
     compare.add_argument("--out", help="Write compare.json, compare.md, charts, and index.html")
     compare.add_argument("--json", action="store_true")
     compare.set_defaults(func=cmd_compare)
@@ -415,19 +445,19 @@ def build_parser() -> argparse.ArgumentParser:
     recommend = sub.add_parser("recommend", help="Pick the best local run plan from a scanned matrix.")
     group = recommend.add_mutually_exclusive_group(required=False)
     group.add_argument("--model", help="Curated model preset, e.g. llama-3.3-70b")
-    group.add_argument("--params", help="Free-form parameter count, e.g. 70B, 120B, 600B")
+    group.add_argument("--params", type=_parameter_count, help="Free-form parameter count, e.g. 70B, 120B, 600B")
     recommend.add_argument("--quants", default=None, help="Comma-separated quantizations. Default: Q8_0,Q6_K,Q5_K_M,Q4_K_M,Q3_K_M,IQ2_XS")
     recommend.add_argument("--contexts", default=None, help="Comma-separated context lengths. Default: 4096,8192,16384,32768")
     recommend.add_argument("--backends", default=None, help="Comma-separated backends. Default: auto")
     recommend.add_argument("--target", choices=["smooth", "tight"], default="tight", help="Required comfort target. Default: tight")
-    recommend.add_argument("--concurrency", type=int, default=1)
+    recommend.add_argument("--concurrency", type=_positive_int, default=1)
     recommend.add_argument("--format", default=None)
     recommend.add_argument("--hardware", default=None, help="Use fixture:name or profile:name")
-    recommend.add_argument("--layers", type=int, default=None)
-    recommend.add_argument("--heads", type=int, default=None)
-    recommend.add_argument("--kv-heads", type=int, default=None)
-    recommend.add_argument("--head-dim", type=int, default=None)
-    recommend.add_argument("--kv-dtype-bytes", type=float, default=2.0)
+    recommend.add_argument("--layers", type=_positive_int, default=None)
+    recommend.add_argument("--heads", type=_positive_int, default=None)
+    recommend.add_argument("--kv-heads", type=_positive_int, default=None)
+    recommend.add_argument("--head-dim", type=_positive_int, default=None)
+    recommend.add_argument("--kv-dtype-bytes", type=_positive_float, default=2.0)
     recommend.add_argument("--out", help="Write recommend.json and recommend.md into this directory")
     recommend.add_argument("--json", action="store_true")
     recommend.set_defaults(func=cmd_recommend)
@@ -458,7 +488,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args) or 0)
+    try:
+        return int(args.func(args) or 0)
+    except ValueError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

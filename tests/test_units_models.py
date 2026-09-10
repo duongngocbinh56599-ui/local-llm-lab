@@ -14,6 +14,12 @@ class UnitsAndModelsTest(unittest.TestCase):
         self.assertAlmostEqual(parse_params("7000M"), 7)
         self.assertAlmostEqual(parse_params(70_000_000_000), 70)
 
+    def test_parse_params_rejects_nonpositive_or_nonfinite_values(self) -> None:
+        for value in ("0B", 0, 0.0, float("inf"), float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "greater than 0"):
+                    parse_params(value)
+
     def test_parse_gib(self) -> None:
         self.assertEqual(parse_gib("128GB"), 128)
         self.assertEqual(parse_gib("1TB"), 1024)
@@ -44,4 +50,3 @@ class UnitsAndModelsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

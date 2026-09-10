@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from math import isfinite
 
 from .hardware import HardwareProfile, detect_hardware
 from .models import ModelProfile, apply_overrides, generic_model_from_params, get_model
@@ -56,6 +57,26 @@ class PlanResult:
         data["inputs"]["model"] = self.inputs.model.to_dict()
         data["inputs"]["hardware"] = self.inputs.hardware.to_dict()
         return data
+
+
+def _require_positive_integer(name: str, value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+
+
+def _require_positive_number(name: str, value: float) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a finite value greater than 0.")
+
+
+def _validate_model_geometry(model: ModelProfile) -> None:
+    _require_positive_number("params_b", model.params_b)
+    _require_positive_integer("layers", model.layers)
+    _require_positive_integer("heads", model.heads)
+    _require_positive_integer("kv_heads", model.kv_heads)
+    _require_positive_integer("head_dim", model.head_dim)
+    if model.kv_heads > model.heads:
+        raise ValueError("kv_heads cannot exceed heads.")
 
 
 def choose_backend(hardware: HardwareProfile, model_format: str, requested: str | None = None) -> str:
@@ -271,6 +292,9 @@ def make_plan(
     head_dim: int | None = None,
     kv_dtype_bytes: float = 2.0,
 ) -> PlanResult:
+    _require_positive_integer("context_tokens", context_tokens)
+    _require_positive_integer("concurrency", concurrency)
+    _require_positive_number("kv_dtype_bytes", kv_dtype_bytes)
     if model_name:
         model = get_model(model_name)
     elif params:
@@ -288,6 +312,7 @@ def make_plan(
         head_dim=head_dim,
         model_format=fmt,
     )
+    _validate_model_geometry(model)
     hw = hardware or detect_hardware(skip_probes=True, fixture=hardware_fixture)
     chosen_backend = choose_backend(hw, fmt, backend)
     quant = get_quantization(quant_name)

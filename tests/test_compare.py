@@ -11,6 +11,8 @@ class CompareTest(unittest.TestCase):
     def test_csv_parsing(self) -> None:
         self.assertEqual(parse_csv("Q6_K,Q4_K_M", ["Q4_K_M"]), ["Q6_K", "Q4_K_M"])
         self.assertEqual(parse_int_csv("4096,8192", [1024]), [4096, 8192])
+        with self.assertRaisesRegex(ValueError, "positive"):
+            parse_int_csv("4096,0", [1024])
 
     def test_compare_finds_best_candidate(self) -> None:
         data = compare_plans(
