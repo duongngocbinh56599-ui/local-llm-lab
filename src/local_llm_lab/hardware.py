@@ -50,6 +50,15 @@ def _sysctl(name: str) -> str:
     return _run(["sysctl", "-n", name])
 
 
+def _sysconf_total_gib() -> float:
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+    except (AttributeError, ValueError, OSError):
+        return 0.0
+    return pages * page_size / (1024**3)
+
+
 def _vm_stat_available_gib() -> float | None:
     output = _run(["vm_stat"])
     if not output:
@@ -157,14 +166,11 @@ def detect_hardware(*, skip_probes: bool = False, fixture: str | None = None) ->
     if system == "Darwin":
         mem = _sysctl("hw.memsize")
         total_gib = int(mem) / (1024**3) if mem.isdigit() else 0.0
+        if total_gib <= 0:
+            total_gib = _sysconf_total_gib()
         cpu = _sysctl("machdep.cpu.brand_string") or cpu
     else:
-        try:
-            pages = os.sysconf("SC_PHYS_PAGES")
-            page_size = os.sysconf("SC_PAGE_SIZE")
-            total_gib = pages * page_size / (1024**3)
-        except Exception:
-            total_gib = 0.0
+        total_gib = _sysconf_total_gib()
 
     psutil = optional_import("psutil")
     available = None
@@ -175,9 +181,15 @@ def detect_hardware(*, skip_probes: bool = False, fixture: str | None = None) ->
             available = virtual.available / (1024**3)
         except Exception:
             available = None
+    if total_gib <= 0:
+        raise ValueError(
+            "Could not determine total system memory. Pass --hardware fixture:<name> or --hardware profile:<name> to plan against known hardware."
+        )
+    available_estimated = False
     if available is None and system == "Darwin":
         available = _vm_stat_available_gib()
     if available is None:
+        available_estimated = True
         try:
             stat = os.statvfs("/")
             # This is disk fallback only when memory APIs are unavailable.
@@ -185,6 +197,8 @@ def detect_hardware(*, skip_probes: bool = False, fixture: str | None = None) ->
             available = max(total_gib * 0.65, 0.0)
         except Exception:
             available = max(total_gib * 0.65, 0.0)
+
+    available = min(max(available, 0.0), total_gib)
 
     disk = shutil.disk_usage("/")
     disk_available_gib = disk.free / (1024**3)
@@ -200,6 +214,8 @@ def detect_hardware(*, skip_probes: bool = False, fixture: str | None = None) ->
     }
 
     probes: dict[str, float | str] = {}
+    if available_estimated:
+        probes["memory_available_estimated"] = "estimated from total memory; real available memory could not be read"
     bandwidth = None
     if not skip_probes:
         try:
