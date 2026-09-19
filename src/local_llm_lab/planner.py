@@ -174,6 +174,13 @@ def _verdict(memory: MemoryEstimate, hardware: HardwareProfile) -> tuple[str, st
     return "does-not-fit", "extreme"
 
 
+def _fits_memory_budget(memory: MemoryEstimate, hardware: HardwareProfile, target_ratio: float) -> bool:
+    """A plan must respect both the static planning envelope and the runtime memory available now."""
+    if memory.total_required_gib > hardware.memory_total_gib * target_ratio:
+        return False
+    return memory.margin_gib >= 0
+
+
 def _estimate_tokens_s(inputs: PlanInputs, memory: MemoryEstimate) -> dict[str, float]:
     bandwidth = inputs.hardware.memory_bandwidth_gbps
     if not bandwidth:
@@ -201,7 +208,6 @@ def _estimate_tokens_s(inputs: PlanInputs, memory: MemoryEstimate) -> dict[str, 
 
 
 def _recommend_quant(inputs: PlanInputs, target_ratio: float = 0.86) -> str:
-    total = inputs.hardware.memory_total_gib
     ordered = sorted(QUANTIZATIONS.values(), key=lambda q: q.bytes_per_param, reverse=True)
     for quant in ordered:
         trial_inputs = PlanInputs(
@@ -214,14 +220,14 @@ def _recommend_quant(inputs: PlanInputs, target_ratio: float = 0.86) -> str:
             backend=inputs.backend,
             kv_dtype_bytes=inputs.kv_dtype_bytes,
         )
-        if estimate_memory(trial_inputs).total_required_gib <= total * target_ratio:
+        trial_memory = estimate_memory(trial_inputs)
+        if _fits_memory_budget(trial_memory, inputs.hardware, target_ratio):
             return quant.name
     return "no-safe-local-quant"
 
 
 def _downgrades(inputs: PlanInputs, memory: MemoryEstimate, verdict: str) -> list[str]:
     options: list[str] = []
-    total = inputs.hardware.memory_total_gib
     if verdict in {"not-recommended", "does-not-fit"}:
         recommended = _recommend_quant(inputs, target_ratio=0.86)
         if recommended == "no-safe-local-quant":
@@ -241,7 +247,8 @@ def _downgrades(inputs: PlanInputs, memory: MemoryEstimate, verdict: str) -> lis
                 backend=inputs.backend,
                 kv_dtype_bytes=inputs.kv_dtype_bytes,
             )
-            if estimate_memory(trial).total_required_gib <= total * 0.9:
+            trial_memory = estimate_memory(trial)
+            if _fits_memory_budget(trial_memory, inputs.hardware, 0.9):
                 options.append(f"Reduce context to {ctx} tokens.")
                 break
         if inputs.concurrency > 1:
